@@ -6,13 +6,14 @@ import { Agreement, Batch, BatchGroup, Claim, LegalEntity } from './models';
 import { DebtGraphComponent, SelectedEdge } from './components/debt-graph.component';
 import { TracePanelComponent } from './components/trace-panel.component';
 import { BatchSummaryComponent } from './components/batch-summary.component';
+import { ComparePanelComponent, CompareJump } from './components/compare-panel.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
   imports: [
     CommonModule, FormsModule,
-    DebtGraphComponent, TracePanelComponent, BatchSummaryComponent,
+    DebtGraphComponent, TracePanelComponent, BatchSummaryComponent, ComparePanelComponent,
   ],
   template: `
     <div class="page">
@@ -78,8 +79,11 @@ import { BatchSummaryComponent } from './components/batch-summary.component';
         </table>
       </section>
 
+      <!-- ---------------- 批次对照 ---------------- -->
+      <app-compare-panel [batches]="batches" (jump)="onCompareJump($event)"></app-compare-panel>
+
       <!-- ---------------- 当前批次 ---------------- -->
-      <ng-container *ngIf="current">
+      <div id="batch-detail" *ngIf="current">
         <app-batch-summary [batch]="current"></app-batch-summary>
 
         <div class="lifecycle">
@@ -119,7 +123,7 @@ import { BatchSummaryComponent } from './components/batch-summary.component';
               逐笔尾差合计 {{ g.roundingDiffTotal }}（承担人 {{ g.roundingBearerCode || '—' }}）。
             </div>
 
-            <app-debt-graph [group]="g" [claims]="claimsForGroup(g)"
+            <app-debt-graph [group]="g" [claims]="claimsForGroup(g)" [(view)]="graphView"
                             (edgeSelected)="onEdge($event)"></app-debt-graph>
             <app-trace-panel [edge]="selectedEdge" (closed)="selectedEdge = null"></app-trace-panel>
           </section>
@@ -170,7 +174,7 @@ import { BatchSummaryComponent } from './components/batch-summary.component';
             </table>
           </section>
         </ng-container>
-      </ng-container>
+      </div>
 
       <p class="muted foot" *ngIf="!current && !loading">
         尚无批次。选择估值日与协议后点击“生成试算方案”。
@@ -221,6 +225,7 @@ export class AppComponent implements OnInit {
   current: Batch | null = null;
   activeGroupId = '';
   selectedEdge: SelectedEdge | null = null;
+  graphView: 'original' | 'netted' = 'original';
 
   constructor(private api: ClearingApiService) {}
 
@@ -268,6 +273,7 @@ export class AppComponent implements OnInit {
       this.current = b;
       this.activeGroupId = b.groups[0]?.id ?? '';
       this.selectedEdge = null;
+      this.graphView = 'original';
     });
   }
 
@@ -278,6 +284,73 @@ export class AppComponent implements OnInit {
 
   onEdge(e: SelectedEdge): void {
     this.selectedEdge = e;
+  }
+
+  /**
+   * Drill-back from a comparison row into one of the two compared batches:
+   * opens that batch read-only, selects the group, flips the debt graph to
+   * the matching view and opens the trace panel on the leg or invoice.
+   */
+  onCompareJump(j: CompareJump): void {
+    this.api.getBatch(j.batchId).subscribe((b) => {
+      this.current = b;
+      this.activeGroupId = j.groupId;
+      const g = b.groups.find((x) => x.id === j.groupId);
+      if (!g) {
+        return;
+      }
+      if (j.target.kind === 'leg') {
+        this.graphView = 'netted';
+        const t = j.target;
+        const leg = g.legs.find((l) => l.amount > 0
+          && l.payerCode === t.payer && l.receiverCode === t.receiver);
+        this.selectedEdge = leg ? {
+          kind: leg.isOriginal ? 'original' : 'cash',
+          payer: leg.payerCode,
+          receiver: leg.receiverCode,
+          amount: leg.amount,
+          currency: leg.settlementCurrency,
+          label: this.money(leg.amount),
+          items: leg.items,
+        } : null;
+      } else {
+        this.graphView = 'original';
+        const claimId = j.target.claimId;
+        const claim = this.claims.find((c) => c.id === claimId);
+        if (claim) {
+          this.selectClaimEdge(g, claim);
+        } else {
+          // Claim list may be stale (e.g. claims added after page load): refresh once.
+          this.api.claims().subscribe((cs) => {
+            this.claims = cs;
+            const fresh = cs.find((c) => c.id === claimId);
+            this.selectedEdge = fresh ? this.claimEdge(g, fresh) : null;
+          });
+        }
+      }
+      setTimeout(() => document.getElementById('batch-detail')
+        ?.scrollIntoView({ behavior: 'smooth' }));
+    });
+  }
+
+  private selectClaimEdge(g: BatchGroup, claim: Claim): void {
+    this.selectedEdge = this.claimEdge(g, claim);
+  }
+
+  private claimEdge(g: BatchGroup, claim: Claim): SelectedEdge {
+    const ex = g.exclusions.find((x) => x.claimId === claim.id);
+    return {
+      kind: ex ? 'excluded' : 'original',
+      payer: claim.debtorCode,
+      receiver: claim.creditorCode,
+      amount: claim.amount,
+      currency: claim.currency,
+      label: this.money(claim.amount),
+      items: [],
+      claim,
+      reasonCode: ex?.reasonCode,
+      reasonDetail: ex?.reasonDetail,
+    };
   }
 
   confirm(): void {

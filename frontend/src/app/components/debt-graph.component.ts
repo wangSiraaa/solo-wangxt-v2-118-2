@@ -51,8 +51,8 @@ interface EdgeView {
     <div class="graph-wrap">
       <div class="graph-toolbar">
         <div class="seg">
-          <button [class.on]="view === 'original'" (click)="view = 'original'">原始债权</button>
-          <button [class.on]="view === 'netted'" (click)="view = 'netted'">清算结果</button>
+          <button [class.on]="view === 'original'" (click)="setView('original')">原始债权</button>
+          <button [class.on]="view === 'netted'" (click)="setView('netted')">清算结果</button>
         </div>
         <span class="muted legend">
           <i class="sw cash"></i> 实付腿
@@ -125,9 +125,11 @@ interface EdgeView {
 export class DebtGraphComponent {
   @Input() group!: BatchGroup;
   @Input() claims: Claim[] = [];
+  /** Two-way bound: parents may flip the view (e.g. compare-panel drill-back). */
+  @Input() view: 'original' | 'netted' = 'original';
+  @Output() viewChange = new EventEmitter<'original' | 'netted'>();
   @Output() edgeSelected = new EventEmitter<SelectedEdge>();
 
-  view: 'original' | 'netted' = 'original';
   nodes: NodeView[] = [];
   edges: EdgeView[] = [];
   height = 320;
@@ -136,6 +138,12 @@ export class DebtGraphComponent {
   private readonly H = 320;
 
   ngOnChanges(): void {
+    this.layout();
+  }
+
+  setView(v: 'original' | 'netted'): void {
+    this.view = v;
+    this.viewChange.emit(v);
     this.layout();
   }
 

@@ -119,3 +119,87 @@ export interface Batch {
   note?: string;
   groups: BatchGroup[];
 }
+
+// ---------------- batch comparison (read-only) ----------------
+
+export interface BatchRef {
+  id: string;
+  valuationDate: string;
+  status: string;
+  createdAt: string;
+  note: string;
+}
+
+export interface IncludedInvoice {
+  claimId: string;
+  invoiceNo: string;
+  debtorCode: string;
+  creditorCode: string;
+  originalAmount: number;
+  originalCurrency: string;
+  bookedAmount: number;
+}
+
+export interface ExcludedInvoice {
+  claimId: string;
+  invoiceNo: string;
+  reasonCode: string;
+  reasonDetail: string;
+}
+
+export interface ReasonChange {
+  claimId: string;
+  invoiceNo: string;
+  leftReasonCode: string;
+  rightReasonCode: string;
+}
+
+export interface InvoiceDiffs {
+  includedLeftOnly: IncludedInvoice[];
+  includedRightOnly: IncludedInvoice[];
+  includedBothCount: number;
+  excludedLeftOnly: ExcludedInvoice[];
+  excludedRightOnly: ExcludedInvoice[];
+  excludedBothCount: number;
+  exclusionReasonChanged: ReasonChange[];
+}
+
+export interface PositionDiff {
+  entityCode: string;
+  leftPosition: number;
+  rightPosition: number;
+  delta: number;
+}
+
+export interface LegDiff {
+  payerCode: string;
+  receiverCode: string;
+  leftAmount: number;
+  rightAmount: number;
+  delta: number;
+  leftLegId: string;
+  rightLegId: string;
+}
+
+export interface GroupComparison {
+  agreementCode: string;
+  agreementName: string;
+  settlementCurrency: string;
+  presence: 'BOTH' | 'LEFT_ONLY' | 'RIGHT_ONLY';
+  leftGroupId: string;
+  rightGroupId: string;
+  leftCashLegCount: number;
+  rightCashLegCount: number;
+  invoices: InvoiceDiffs;
+  positions: PositionDiff[];
+  paymentLegs: LegDiff[];
+  zeroDiff: boolean;
+}
+
+export interface BatchComparison {
+  left: BatchRef;
+  right: BatchRef;
+  leftCashLegCount: number;
+  rightCashLegCount: number;
+  groups: GroupComparison[];
+}

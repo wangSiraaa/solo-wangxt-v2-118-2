@@ -9,6 +9,10 @@
 - **跨币种可审计**：每一笔都列出汇率、汇率时点、精确换算(6 位小数)、
   入账换算(2 位小数)、尾差及其归属法人；
 - **可追溯**：在 Angular 债务图上点任意一条边，都能追到被抵销的原始发票；
+- **批次对照**：同一估值日常有两次试算，可并列对照两个已保存批次——
+  按「协议＋结算币种」分组展示纳入/排除发票、各法人净头寸与正金额付款腿的差异，
+  并能从差异行跳回原批次的图边或发票追溯；不同币种绝不相加成一个差额，
+  对照只读，不改确认状态、不重估汇率；
 - **不接真实银行**：只有 `SIMULATED → CONFIRMED → PAID_SIMULATED`
   三个状态，付款只写模拟时间戳，不产生任何银行指令。
 
@@ -103,6 +107,7 @@ npm start            # http://localhost:4200 ，/api 代理到 8080
 | GET | `/api/entities` `/api/agreements` `/api/claims` `/api/fx-rates` | 主数据 |
 | POST | `/api/batches/simulate` | 生成试算批次（不动债权） |
 | GET | `/api/batches` `/api/batches/{id}` | 批次列表 / 详情（含腿、逐笔追溯、排除） |
+| GET | `/api/batches/compare?left=&right=` | 两个已保存批次的只读对照（按协议＋币种分组） |
 | POST | `/api/batches/{id}/confirm` | 确认方案 |
 | POST | `/api/batches/{id}/pay-simulated` | 模拟付款 |
 
@@ -128,3 +133,7 @@ cd backend && ./mvnw clean test
   `NA-CNY` 缩减、`NA-NOFF` 保留、`NA-XCCY` 尾差、
   确认后原债权状态变化、pass-through 债权仍开放、
   模拟付款打标、重复确认冲突。
+- `BatchCompareTests`（Spring 全栈）：两个完全相同批次零差异；
+  新增一张发票后，纳入发票差异、付款腿增减与各法人净头寸变化一一对应；
+  同协议不同币种的分组各自独立展示、金额绝不跨币种相加；
+  对照前后原批次内容逐字节不变（只读）。
