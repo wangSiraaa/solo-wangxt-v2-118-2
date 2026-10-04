@@ -9,6 +9,9 @@
 - **跨币种可审计**：每一笔都列出汇率、汇率时点、精确换算(6 位小数)、
   入账换算(2 位小数)、尾差及其归属法人；
 - **可追溯**：在 Angular 债务图上点任意一条边，都能追到被抵销的原始发票；
+- **批次对照**：同一估值日常会试算两版方案，可对照两个已保存批次——
+  按“协议＋结算币种”并列展示纳入/排除的发票、各法人净头寸与正金额付款腿差异，
+  并可从差异行跳回原批次的图边或发票追溯；对照只读，不改确认状态、不重估汇率；
 - **不接真实银行**：只有 `SIMULATED → CONFIRMED → PAID_SIMULATED`
   三个状态，付款只写模拟时间戳，不产生任何银行指令。
 
@@ -95,6 +98,16 @@ npm start            # http://localhost:4200 ，/api 代理到 8080
    - 确认 `CONFIRMED`：把被抵销的开放债权标记为 `SETTLED` 并回填批次号；
      pass-through 分组的债权保持开放；重复确认返回 409；
    - 模拟付款 `PAID_SIMULATED`：只给实付腿打付款时间戳，**不接银行**。
+7. **批次对照**（`GET /api/batches/compare?left=..&right=..`）：
+   - 只读取两个**已保存**批次的 `batch_*` 结构，不跑净额引擎、不重估汇率、
+     不改任何状态；
+   - 分组按 (协议, 结算币种) 严格配对：同一键的两组逐项对照；
+     仅一侧存在的分组整体标注 `LEFT_ONLY` / `RIGHT_ONLY`；
+     **不同协议或币种的分组各自独立展示，绝不跨组合计差额**；
+   - 每组输出：发票纳入/排除/未出现（含排除原因变化）、各法人净头寸
+     （正=净付款，结算币种）、正金额付款腿（按 付款方→收款方 配对，
+     零金额抵销备忘录腿不参与）及其两侧腿号，供前端跳回原批次图边；
+   - 两个完全相同的批次对照结果为零差异（`zeroDifference=true`）。
 
 ## 主要 API
 
@@ -103,6 +116,7 @@ npm start            # http://localhost:4200 ，/api 代理到 8080
 | GET | `/api/entities` `/api/agreements` `/api/claims` `/api/fx-rates` | 主数据 |
 | POST | `/api/batches/simulate` | 生成试算批次（不动债权） |
 | GET | `/api/batches` `/api/batches/{id}` | 批次列表 / 详情（含腿、逐笔追溯、排除） |
+| GET | `/api/batches/compare?left=&right=` | 两个已保存批次的只读对照（分组差异） |
 | POST | `/api/batches/{id}/confirm` | 确认方案 |
 | POST | `/api/batches/{id}/pay-simulated` | 模拟付款 |
 
@@ -127,4 +141,7 @@ cd backend && ./mvnw clean test
 - `ClearingApplicationTests`（Spring 全栈）：在演示数据上验证
   `NA-CNY` 缩减、`NA-NOFF` 保留、`NA-XCCY` 尾差、
   确认后原债权状态变化、pass-through 债权仍开放、
-  模拟付款打标、重复确认冲突。
+  模拟付款打标、重复确认冲突；
+- `BatchCompareTests`（Spring 全栈）：相同批次零差异、确认前后两轮试算的
+  发票差异与付款腿差异一一对应、对照只读不改批次/债权、单侧分组
+  `LEFT_ONLY`/`RIGHT_ONLY` 展示、未知批次 404。

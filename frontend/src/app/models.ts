@@ -119,3 +119,86 @@ export interface Batch {
   note?: string;
   groups: BatchGroup[];
 }
+
+// ---------------- batch comparison (read-only) ----------------
+
+export type ComparePresence = 'BOTH' | 'LEFT_ONLY' | 'RIGHT_ONLY';
+export type InvoiceState = 'INCLUDED' | 'EXCLUDED' | 'ABSENT';
+
+export interface BatchRef {
+  id: string;
+  valuationDate: string;
+  status: string;
+  createdAt: string;
+  note?: string;
+}
+
+export interface InvoiceDiff {
+  claimId: string;
+  invoiceNo: string;
+  debtorCode: string;
+  creditorCode: string;
+  amount: number;
+  currency: string;
+  leftState: InvoiceState;
+  rightState: InvoiceState;
+  leftReasonCode?: string;
+  rightReasonCode?: string;
+  changed: boolean;
+}
+
+export interface PositionDiff {
+  entityCode: string;
+  leftNet: number;
+  rightNet: number;
+  diff: number;
+}
+
+export interface LegDiff {
+  payerCode: string;
+  receiverCode: string;
+  presence: ComparePresence;
+  leftAmount?: number;
+  rightAmount?: number;
+  diff: number;
+  leftLegIds: string[];
+  rightLegIds: string[];
+  leftGroupId?: string;
+  rightGroupId?: string;
+}
+
+export interface GroupComparison {
+  key: string;
+  agreementCode: string;
+  agreementName: string;
+  settlementCurrency: string;
+  presence: ComparePresence;
+  leftGroupId?: string;
+  rightGroupId?: string;
+  invoices: InvoiceDiff[];
+  positions: PositionDiff[];
+  legs: LegDiff[];
+  invoiceChangeCount: number;
+  legChangeCount: number;
+  leftCashLegCount: number;
+  rightCashLegCount: number;
+  leftNetTotal: number;
+  rightNetTotal: number;
+  netTotalDiff: number;
+  zeroDifference: boolean;
+}
+
+export interface BatchComparison {
+  left: BatchRef;
+  right: BatchRef;
+  groups: GroupComparison[];
+  zeroDifference: boolean;
+}
+
+/** Navigation request from a comparison row back into one batch's graph/trace. */
+export interface CompareJump {
+  batchId: string;
+  groupId: string;
+  legId?: string;
+  claimId?: string;
+}

@@ -2,17 +2,21 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ClearingApiService } from './api.service';
-import { Agreement, Batch, BatchGroup, Claim, LegalEntity } from './models';
-import { DebtGraphComponent, SelectedEdge } from './components/debt-graph.component';
+import {
+  Agreement, Batch, BatchComparison, BatchGroup,
+  Claim, CompareJump, LegalEntity,
+} from './models';
+import { DebtGraphComponent, GraphFocus, SelectedEdge } from './components/debt-graph.component';
 import { TracePanelComponent } from './components/trace-panel.component';
 import { BatchSummaryComponent } from './components/batch-summary.component';
+import { ComparePanelComponent } from './components/compare-panel.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
   imports: [
     CommonModule, FormsModule,
-    DebtGraphComponent, TracePanelComponent, BatchSummaryComponent,
+    DebtGraphComponent, TracePanelComponent, BatchSummaryComponent, ComparePanelComponent,
   ],
   template: `
     <div class="page">
@@ -76,7 +80,34 @@ import { BatchSummaryComponent } from './components/batch-summary.component';
           </tr>
           </tbody>
         </table>
+
+        <div class="compare-bar">
+          <label>基准（左）
+            <select [(ngModel)]="compareLeft">
+              <option *ngFor="let b of batches" [value]="b.id">
+                {{ b.id }} · {{ b.valuationDate }} · {{ statusText(b.status) }}
+              </option>
+            </select>
+          </label>
+          <label>对照（右）
+            <select [(ngModel)]="compareRight">
+              <option *ngFor="let b of batches" [value]="b.id">
+                {{ b.id }} · {{ b.valuationDate }} · {{ statusText(b.status) }}
+              </option>
+            </select>
+          </label>
+          <button class="primary" (click)="runCompare()"
+                  [disabled]="!compareLeft || !compareRight || comparing">
+            {{ comparing ? '对照中…' : '对照两个已保存批次' }}
+          </button>
+          <span class="muted">只读对照：按协议＋结算币种分组比对，不改确认状态、不重估汇率</span>
+        </div>
       </section>
+
+      <!-- ---------------- 批次对照结果 ---------------- -->
+      <app-compare-panel *ngIf="comparison" [comparison]="comparison"
+                         (jumpTo)="onCompareJump($event)"
+                         (closed)="comparison = null"></app-compare-panel>
 
       <!-- ---------------- 当前批次 ---------------- -->
       <ng-container *ngIf="current">
@@ -119,7 +150,7 @@ import { BatchSummaryComponent } from './components/batch-summary.component';
               逐笔尾差合计 {{ g.roundingDiffTotal }}（承担人 {{ g.roundingBearerCode || '—' }}）。
             </div>
 
-            <app-debt-graph [group]="g" [claims]="claimsForGroup(g)"
+            <app-debt-graph [group]="g" [claims]="claimsForGroup(g)" [focus]="graphFocus"
                             (edgeSelected)="onEdge($event)"></app-debt-graph>
             <app-trace-panel [edge]="selectedEdge" (closed)="selectedEdge = null"></app-trace-panel>
           </section>
@@ -193,6 +224,9 @@ import { BatchSummaryComponent } from './components/batch-summary.component';
     .group-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
     .group-tabs button.on { background: #0369a1; border-color: #0284c7; color: #fff; }
     .group-meta { margin-bottom: 10px; font-size: 12.5px; }
+    .compare-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+    .compare-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+    .compare-bar select { max-width: 340px; }
     .tag { padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); }
     .tag.SIMULATED { color: var(--accent); border-color: var(--accent); }
     .tag.CONFIRMED { color: var(--good); border-color: var(--good); }
@@ -221,6 +255,12 @@ export class AppComponent implements OnInit {
   current: Batch | null = null;
   activeGroupId = '';
   selectedEdge: SelectedEdge | null = null;
+  graphFocus: GraphFocus | null = null;
+
+  compareLeft = '';
+  compareRight = '';
+  comparison: BatchComparison | null = null;
+  comparing = false;
 
   constructor(private api: ClearingApiService) {}
 
@@ -228,7 +268,10 @@ export class AppComponent implements OnInit {
     this.api.entities().subscribe((x) => (this.entities = x));
     this.api.agreements().subscribe((x) => (this.agreements = x));
     this.api.claims().subscribe((x) => (this.claims = x));
-    this.api.listBatches().subscribe((x) => (this.batches = x));
+    this.api.listBatches().subscribe((x) => {
+      this.batches = x;
+      this.ensureCompareDefaults();
+    });
   }
 
   selectedAgreementObj(): Agreement | undefined {
@@ -257,6 +300,7 @@ export class AppComponent implements OnInit {
       next: (b) => {
         this.loading = false;
         this.batches = [b, ...this.batches];
+        this.ensureCompareDefaults();
         this.openBatch(b.id);
       },
       error: () => (this.loading = false),
@@ -264,6 +308,7 @@ export class AppComponent implements OnInit {
   }
 
   openBatch(id: string): void {
+    this.graphFocus = null;
     this.api.getBatch(id).subscribe((b) => {
       this.current = b;
       this.activeGroupId = b.groups[0]?.id ?? '';
@@ -274,6 +319,43 @@ export class AppComponent implements OnInit {
   selectGroup(g: BatchGroup): void {
     this.activeGroupId = g.id;
     this.selectedEdge = null;
+    this.graphFocus = null;
+  }
+
+  runCompare(): void {
+    if (!this.compareLeft || !this.compareRight) {
+      return;
+    }
+    this.comparing = true;
+    this.api.compareBatches(this.compareLeft, this.compareRight).subscribe({
+      next: (c) => {
+        this.comparing = false;
+        this.comparison = c;
+      },
+      error: () => (this.comparing = false),
+    });
+  }
+
+  /** Jump from a comparison row back into the source batch's graph edge / invoice trace. */
+  onCompareJump(j: CompareJump): void {
+    this.api.getBatch(j.batchId).subscribe((b) => {
+      this.current = b;
+      this.activeGroupId = j.groupId;
+      this.selectedEdge = null;
+      this.graphFocus = { legId: j.legId, claimId: j.claimId };
+      setTimeout(() => document.querySelector('app-debt-graph')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+    });
+  }
+
+  private ensureCompareDefaults(): void {
+    const ids = this.batches.map((b) => b.id);
+    if (!ids.includes(this.compareRight)) {
+      this.compareRight = ids[0] ?? '';
+    }
+    if (!ids.includes(this.compareLeft)) {
+      this.compareLeft = ids[1] ?? ids[0] ?? '';
+    }
   }
 
   onEdge(e: SelectedEdge): void {

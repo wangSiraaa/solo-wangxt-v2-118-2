@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -22,9 +23,13 @@ import java.time.LocalDate;
  * - NA-NOFF : closed ring preserved as 3 original debts;
  * - NA-XCCY : mixed-currency ring nets into CNY with rate/time/diff recorded;
  * - lifecycle: SIMULATED -> CONFIRMED -> PAID_SIMULATED, claims only settle on confirm.
+ *
+ * Transactional so the confirmed claims roll back and other Spring test classes
+ * sharing this context still see the pristine seed data.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 class ClearingApplicationTests {
 
     @Autowired

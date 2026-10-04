@@ -3,6 +3,8 @@ package com.treasury.clearing.web;
 import com.treasury.clearing.domain.*;
 import com.treasury.clearing.service.BatchService;
 import com.treasury.clearing.service.BatchService.SimulationRequest;
+import com.treasury.clearing.service.compare.BatchCompareService;
+import com.treasury.clearing.service.compare.BatchComparison;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -18,17 +20,20 @@ import java.util.*;
 public class ClearingController {
 
     private final BatchService batchService;
+    private final BatchCompareService batchCompareService;
     private final com.treasury.clearing.repo.LegalEntityRepository entityRepository;
     private final com.treasury.clearing.repo.NettingAgreementRepository agreementRepository;
     private final com.treasury.clearing.repo.ClaimRepository claimRepository;
     private final com.treasury.clearing.repo.FxRateRepository fxRateRepository;
 
     public ClearingController(BatchService batchService,
+                              BatchCompareService batchCompareService,
                               com.treasury.clearing.repo.LegalEntityRepository entityRepository,
                               com.treasury.clearing.repo.NettingAgreementRepository agreementRepository,
                               com.treasury.clearing.repo.ClaimRepository claimRepository,
                               com.treasury.clearing.repo.FxRateRepository fxRateRepository) {
         this.batchService = batchService;
+        this.batchCompareService = batchCompareService;
         this.entityRepository = entityRepository;
         this.agreementRepository = agreementRepository;
         this.claimRepository = claimRepository;
@@ -157,6 +162,16 @@ public class ClearingController {
     @GetMapping("/batches/{id}")
     public Map<String, Object> getBatch(@PathVariable String id) {
         return toBatchJson(batchService.getBatch(id));
+    }
+
+    /**
+     * Read-only side-by-side comparison of two saved batches. The literal path
+     * takes precedence over the {@code /batches/{id}} template. Never touches
+     * confirmation status and never re-estimates FX.
+     */
+    @GetMapping("/batches/compare")
+    public BatchComparison compareBatches(@RequestParam String left, @RequestParam String right) {
+        return batchCompareService.compare(left, right);
     }
 
     @PostMapping("/batches/{id}/confirm")

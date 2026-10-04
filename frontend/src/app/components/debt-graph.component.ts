@@ -15,6 +15,15 @@ export interface SelectedEdge {
   reasonDetail?: string;
 }
 
+/**
+ * Programmatic focus request (e.g. from the batch-comparison view):
+ * switch to the right view and select the edge of one leg or one claim.
+ */
+export interface GraphFocus {
+  legId?: string;
+  claimId?: string;
+}
+
 interface NodeView {
   code: string;
   x: number;
@@ -23,6 +32,8 @@ interface NodeView {
 
 interface EdgeView {
   id: string;
+  /** Leg id (netted view) or claim id (original view) this edge was built from. */
+  refId: string;
   kind: SelectedEdge['kind'];
   from: string;
   to: string;
@@ -51,8 +62,8 @@ interface EdgeView {
     <div class="graph-wrap">
       <div class="graph-toolbar">
         <div class="seg">
-          <button [class.on]="view === 'original'" (click)="view = 'original'">原始债权</button>
-          <button [class.on]="view === 'netted'" (click)="view = 'netted'">清算结果</button>
+          <button [class.on]="view === 'original'" (click)="setView('original')">原始债权</button>
+          <button [class.on]="view === 'netted'" (click)="setView('netted')">清算结果</button>
         </div>
         <span class="muted legend">
           <i class="sw cash"></i> 实付腿
@@ -91,7 +102,7 @@ interface EdgeView {
 
         <g *ngFor="let e of edges" class="edge" (click)="select(e)">
           <line [attr.x1]="e.x1" [attr.y1]="e.y1" [attr.x2]="e.x2" [attr.y2]="e.y2"
-                class="ln" [class]="e.kind"
+                class="ln" [class]="e.kind" [class.focused]="e.id === focusedId"
                 [attr.marker-end]="markerFor(e.kind)"/>
           <text [attr.x]="e.mx" [attr.y]="e.my - 6" text-anchor="middle"
                 class="amt" [class]="e.kind">{{ e.label }}</text>
@@ -116,6 +127,7 @@ interface EdgeView {
     .ln { stroke-width: 2; fill: none; }
     .ln.cash { stroke: #38bdf8; } .ln.memo { stroke: #a78bfa; stroke-dasharray: 6 4; }
     .ln.orig { stroke: #94a3b8; } .ln.excl { stroke: #f87171; stroke-dasharray: 2 3; }
+    .ln.focused { stroke-width: 4.5; filter: drop-shadow(0 0 4px rgba(56,189,248,.8)); }
     .hit { stroke: transparent; stroke-width: 14; }
     .amt { font-size: 11px; font-variant-numeric: tabular-nums; }
     .amt.cash { fill: #7dd3fc; } .amt.memo { fill: #c4b5fd; }
@@ -125,18 +137,28 @@ interface EdgeView {
 export class DebtGraphComponent {
   @Input() group!: BatchGroup;
   @Input() claims: Claim[] = [];
+  @Input() focus: GraphFocus | null = null;
   @Output() edgeSelected = new EventEmitter<SelectedEdge>();
 
   view: 'original' | 'netted' = 'original';
   nodes: NodeView[] = [];
   edges: EdgeView[] = [];
   height = 320;
+  focusedId: string | null = null;
 
+  private appliedFocus: GraphFocus | null = null;
   private readonly W = 720;
   private readonly H = 320;
 
   ngOnChanges(): void {
     this.layout();
+    // Apply each focus request exactly once (a new object identity = a new jump).
+    if (this.focus && this.focus !== this.appliedFocus) {
+      this.appliedFocus = this.focus;
+      this.applyFocus(this.focus);
+    } else if (!this.focus) {
+      this.appliedFocus = null;
+    }
   }
 
   markerFor(kind: string): string {
@@ -144,12 +166,32 @@ export class DebtGraphComponent {
              original: 'url(#arrow-orig)', excluded: 'url(#arrow-excl)' }[kind] ?? '';
   }
 
+  setView(v: 'original' | 'netted'): void {
+    this.view = v;
+    this.focusedId = null;
+    this.layout();
+  }
+
   select(e: EdgeView): void {
+    this.focusedId = e.id;
     this.edgeSelected.emit({
       kind: e.kind, payer: e.from, receiver: e.to, amount: e.amount,
       currency: e.currency, label: e.label, items: e.items,
       claim: e.claim, reasonCode: e.reasonCode, reasonDetail: e.reasonDetail,
     });
+  }
+
+  private applyFocus(f: GraphFocus): void {
+    const refId = f.legId ?? f.claimId;
+    if (!refId) {
+      return;
+    }
+    this.view = f.legId ? 'netted' : 'original';
+    this.layout();
+    const edge = this.edges.find((e) => e.refId === refId);
+    if (edge) {
+      this.select(edge);
+    }
   }
 
   private layout(): void {
@@ -182,7 +224,7 @@ export class DebtGraphComponent {
       for (const c of this.claims) {
         const ex = excludedByClaim.get(c.id);
         const kind: SelectedEdge['kind'] = ex ? 'excluded' : 'original';
-        this.edges.push(this.edge(`o${k++}`, kind, c.debtorCode, c.creditorCode,
+        this.edges.push(this.edge(`o${k++}`, c.id, kind, c.debtorCode, c.creditorCode,
           c.amount, c.currency, this.fmt(c.amount, c.currency) + (ex ? ' ✕' : ''),
           pos, [], c, ex?.reasonCode, ex?.reasonDetail));
       }
@@ -194,13 +236,13 @@ export class DebtGraphComponent {
         const text = l.amount === 0
           ? '抵销 0'
           : this.fmt(l.amount, l.settlementCurrency);
-        this.edges.push(this.edge(`n${k++}`, kind, l.payerCode, l.receiverCode,
+        this.edges.push(this.edge(`n${k++}`, l.id, kind, l.payerCode, l.receiverCode,
           l.amount, l.settlementCurrency, text, pos, l.items));
       }
     }
   }
 
-  private edge(id: string, kind: SelectedEdge['kind'], from: string, to: string,
+  private edge(id: string, refId: string, kind: SelectedEdge['kind'], from: string, to: string,
                amount: number, currency: string, label: string,
                pos: Map<string, {x:number;y:number}>, items: LegItem[],
                claim?: Claim, reasonCode?: string, reasonDetail?: string): EdgeView {
@@ -222,7 +264,7 @@ export class DebtGraphComponent {
     const x2 = b.x - ux * rad;
     const y2 = b.y - uy * rad;
     return {
-      id, kind, from, to, amount, currency, label, items, claim, reasonCode, reasonDetail,
+      id, refId, kind, from, to, amount, currency, label, items, claim, reasonCode, reasonDetail,
       x1, y1, x2, y2,
       mx: (x1 + x2) / 2 + nx * bow * len,
       my: (y1 + y2) / 2 + ny * bow * len,
